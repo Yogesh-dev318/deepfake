@@ -30,12 +30,15 @@ export default function Page() {
         };
 
   return (
-    <div>
-        <ShootingStars />
-        <StarsBackground/>
-        <div className="flex flex-col justify-center items-center h-[60vh]">
+    <div className="relative w-full h-screen bg-black">
+      {/* Animated Backgrounds */}
+      <ShootingStars />
+      <StarsBackground />
+
+      {/* Centered Sign-In Component */}
+      <div className="flex justify-center items-center w-full h-full">
         <SignIn appearance={Theme} />
-        </div>
+      </div>
     </div>
     
   );
