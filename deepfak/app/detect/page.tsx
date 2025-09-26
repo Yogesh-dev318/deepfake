@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useCallback, FC } from "react";
+import { useState, FC } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { UploadCloud, Loader2, CheckCircle, XCircle, Wand2 } from "lucide-react";
-import { useDropzone, DropzoneRootProps, DropzoneInputProps, FileRejection } from "react-dropzone";
+import { Loader2, CheckCircle, XCircle, Wand2 } from "lucide-react";
 import axios, { AxiosError } from 'axios';
+import { FileUpload } from "@/components/ui/file-upload";
+import { ShootingStars } from "@/components/ui/shooting-stars";
+import { StarsBackground } from "@/components/ui/stars-background";
 
 // --- Type Definitions ---
 
@@ -33,14 +35,8 @@ const useImageAnalysis = () => {
     formData.append("file", file);
 
     try {
-      // This endpoint should point to your Flask API.
-      // You may need to configure a proxy in your Next.js config for local development.
       const response = await axios.post("/api/predict", formData);
-
       const data = response.data;
-
-      // Assumes the Flask API returns a JSON object like:
-      // { "prediction": "fake" or "real", "confidence": 0.98 }
       const isFake = data.prediction === 'fake';
       const confidence = Math.round(data.confidence * 100);
 
@@ -74,48 +70,46 @@ const useImageAnalysis = () => {
 export default function DetectPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [dropzoneError, setDropzoneError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { isAnalyzing, analysisResult, apiError, analyzeImage, setAnalysisResult, setApiError } = useImageAnalysis();
 
-  const onDrop = useCallback((acceptedFiles: File[], fileRejections: FileRejection[]) => {
+  const handleFileSelect = (selectedFile: File) => {
     setAnalysisResult(null);
-    setDropzoneError(null);
+    setError(null);
     setApiError(null);
-    if (fileRejections.length > 0) {
-        setDropzoneError("Please upload an image file (png, jpg, etc.).");
-        return;
+
+    const acceptedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!acceptedTypes.includes(selectedFile.type)) {
+      setError("Please upload a valid image file (png, jpg, webp).");
+      setFile(null);
+      setPreview(null);
+      return;
     }
 
-    const selectedFile = acceptedFiles[0];
     setFile(selectedFile);
     const previewUrl = URL.createObjectURL(selectedFile);
     setPreview(previewUrl);
-  }, [setAnalysisResult, setApiError]);
+  };
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: { 'image/*': ['.jpeg', '.png', '.jpg', '.webp'] },
-    maxFiles: 1,
-  });
-  
   const handleReset = () => {
       setFile(null);
       if (preview) {
         URL.revokeObjectURL(preview);
       }
       setPreview(null);
-      setDropzoneError(null);
+      setError(null);
       setApiError(null);
       setAnalysisResult(null);
   }
 
-  const error = dropzoneError || apiError;
+  const displayedError = error || apiError;
 
   return (
-    <div className="w-full min-h-screen bg-black text-white py-24 px-4 sm:px-6 lg:px-8">
-      <div className="container mx-auto max-w-3xl flex flex-col items-center">
+    <div className="relative w-full min-h-screen bg-black text-white py-24 px-4 sm:px-6 lg:px-8">
+      <ShootingStars />
+      <StarsBackground />
+      <div className="relative z-10 container mx-auto max-w-3xl flex flex-col items-center">
         
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -130,22 +124,54 @@ export default function DetectPage() {
           </p>
         </motion.div>
 
-        {/* Main Content Area */}
         <div className="w-full">
             <AnimatePresence mode="wait">
                 {analysisResult ? (
                     <AnalysisResult result={analysisResult} onReset={handleReset} preview={preview} />
                 ) : (
-                    <UploadArea 
-                        getRootProps={getRootProps}
-                        getInputProps={getInputProps}
-                        isDragActive={isDragActive}
-                        preview={preview}
-                        error={error}
-                        isAnalyzing={isAnalyzing}
-                        onAnalyze={() => analyzeImage(file)}
-                        onReset={handleReset}
-                    />
+                  <motion.div
+                    key="upload"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.3 }}
+                    className="w-full"
+                  >
+                    {!preview ? (
+                      <FileUpload
+                        onChange={(files) => {
+                          const firstFile = files?.[0];
+                          if (firstFile) handleFileSelect(firstFile);
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full flex flex-col items-center gap-6">
+                        <div className="w-full max-w-md aspect-square rounded-lg overflow-hidden border border-neutral-800 bg-black flex items-center justify-center">
+                          <img src={preview} alt="Image preview" className="max-w-full max-h-full object-contain" />
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <Button onClick={handleReset} variant="outline" className="px-6 py-3">
+                            Change Image
+                          </Button>
+                          <Button onClick={() => analyzeImage(file)} size="lg" className="px-8 py-6 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:opacity-90 group" disabled={isAnalyzing}>
+                            {isAnalyzing ? (
+                              <>
+                                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                Analyzing...
+                              </>
+                            ) : (
+                              <>
+                                Analyze Image
+                                <Wand2 className="ml-2 h-5 w-5 transition-transform duration-300 group-hover:rotate-12" />
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {displayedError && <p className="text-red-500 text-center mt-4">{displayedError}</p>}
+                  </motion.div>
                 )}
             </AnimatePresence>
         </div>
@@ -154,72 +180,7 @@ export default function DetectPage() {
   );
 }
 
-
 // --- Sub-components for clarity ---
-
-interface UploadAreaProps {
-    getRootProps: <T extends DropzoneRootProps>(props?: T) => T;
-    getInputProps: <T extends DropzoneInputProps>(props?: T) => T;
-    isDragActive: boolean;
-    preview: string | null;
-    error: string | null;
-    isAnalyzing: boolean;
-    onAnalyze: () => void;
-    onReset: () => void;
-}
-
-const UploadArea: FC<UploadAreaProps> = ({ getRootProps, getInputProps, isDragActive, preview, error, isAnalyzing, onAnalyze, onReset }) => (
-    <motion.div
-      key="upload"
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.3 }}
-      className="w-full"
-    >
-      {!preview ? (
-        <div
-          {...getRootProps()}
-          className={`w-full p-12 border-2 border-dashed rounded-lg cursor-pointer transition-colors
-          ${isDragActive ? "border-blue-500 bg-blue-500/10" : "border-neutral-700 hover:border-neutral-500"}
-          flex flex-col items-center justify-center text-center`}
-        >
-          <input {...getInputProps()} />
-          <UploadCloud size={48} className="text-neutral-500 mb-4" />
-          <p className="text-lg font-semibold">
-            {isDragActive ? "Drop the image here..." : "Drag & drop an image, or click to select"}
-          </p>
-          <p className="text-neutral-400 text-sm mt-1">PNG, JPG, WEBP accepted</p>
-        </div>
-      ) : (
-        <div className="w-full flex flex-col items-center gap-6">
-          <div className="w-full max-w-md aspect-square rounded-lg overflow-hidden border border-neutral-800 bg-black flex items-center justify-center">
-            <img src={preview} alt="Image preview" className="max-w-full max-h-full object-contain" />
-          </div>
-          <div className="flex items-center gap-4">
-            <Button onClick={onReset} variant="outline" className="px-6 py-3">
-              Change Image
-            </Button>
-            <Button onClick={onAnalyze} size="lg" className="px-8 py-6 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:opacity-90 group" disabled={isAnalyzing}>
-              {isAnalyzing ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  Analyze Image
-                  <Wand2 className="ml-2 h-5 w-5 transition-transform duration-300 group-hover:rotate-12" />
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      )}
-      
-      {error && <p className="text-red-500 text-center mt-4">{error}</p>}
-    </motion.div>
-);
 
 interface AnalysisResultProps {
     result: AnalysisResultType;
