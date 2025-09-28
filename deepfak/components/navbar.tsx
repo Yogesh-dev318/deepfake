@@ -7,13 +7,15 @@ import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { Button } from "./ui/button";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { cn } from "@/lib/utils";
 
 const Navbar = () => {
+  // --- HOOKS ---
+  // All hooks must be called at the top level and unconditionally.
   const [scrolled, setScrolled] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const pathname = usePathname();
 
-  // Effect to handle scroll detection
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 10);
@@ -22,48 +24,61 @@ const Navbar = () => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Effect to disable body scroll when mobile menu is open
   useEffect(() => {
-    if (isMenuOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "auto";
-    }
+    document.body.style.overflow = isMenuOpen ? "hidden" : "auto";
   }, [isMenuOpen]);
 
-  // Hide Navbar on authentication pages
-  const isAuthPage =
-    pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up");
-  if (isAuthPage) {
+  // --- RENDER LOGIC ---
+  // Conditionally render null *after* all hooks have been called.
+  const authRoutes = ["/sign-in", "/sign-up"];
+  if (authRoutes.some(route => pathname.startsWith(route))) {
     return null;
   }
+  
+  const navItems = [
+    { href: "/detect", label: "Image Analysis" },
+    { href: "/audio", label: "Audio Analysis" },
+  ];
 
   const navLinks = (
-    <>
-      <SignedOut>
-        <div className="flex items-center gap-2">
-          <Link href="/sign-in" passHref>
-            <Button variant="ghost" className="text-base md:text-lg">
-              Log In
-            </Button>
-          </Link>
-          <Link href="/sign-up" passHref>
-            <Button className="text-base md:text-lg bg-blue-500 hover:bg-blue-600 text-white rounded-full px-6">
-              Sign Up
-            </Button>
-          </Link>
-        </div>
-      </SignedOut>
-      <SignedIn>
-        <UserButton
-          appearance={{
-            elements: {
-              avatarBox: "w-10 h-10",
-            },
-          }}
-        />
-      </SignedIn>
-    </>
+    <div className="flex items-center gap-8">
+      {navItems.map((item) => (
+        <Link
+          key={item.href}
+          href={item.href}
+          className={cn(
+            "text-lg transition-colors hover:text-white",
+            pathname === item.href ? "text-white font-semibold" : "text-neutral-400"
+          )}
+        >
+          {item.label}
+        </Link>
+      ))}
+    </div>
+  );
+  
+  const authButtons = (
+     <div className="flex items-center gap-4">
+        <SignedOut>
+           <Link href="/sign-in">
+              <Button variant="ghost" className="text-lg text-neutral-400 hover:text-white">Log In</Button>
+           </Link>
+           <Link href="/sign-up">
+             <Button className="px-5 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold rounded-lg hover:opacity-90 transition-opacity">
+                Sign Up
+             </Button>
+           </Link>
+        </SignedOut>
+        <SignedIn>
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: "w-10 h-10",
+              },
+            }}
+          />
+        </SignedIn>
+      </div>
   );
 
   return (
@@ -76,21 +91,17 @@ const Navbar = () => {
         }`}
       >
         <div className="container mx-auto flex h-20 items-center justify-between px-4 sm:px-6 lg:px-8">
-          {/* Logo */}
-          <Link
-            href="/"
-            className="pointer"
-            onClick={() => setIsMenuOpen(false)}
-          >
+          <Link href="/" className="pointer" onClick={() => setIsMenuOpen(false)}>
             <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-b from-blue-400 to-blue-600">
             Aletheia
             </h1>
           </Link>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-6">{navLinks}</nav>
+          <nav className="hidden md:flex items-center gap-8">
+            {navLinks}
+            {authButtons}
+          </nav>
 
-          {/* Mobile Menu Button */}
           <div className="md:hidden">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
@@ -103,7 +114,6 @@ const Navbar = () => {
         </div>
       </header>
 
-      {/* Mobile Menu */}
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div
@@ -114,37 +124,43 @@ const Navbar = () => {
             className="fixed top-20 left-0 w-full h-[calc(100vh-5rem)] bg-black/95 backdrop-blur-lg z-40 md:hidden"
           >
             <div className="container mx-auto flex flex-col items-center justify-center h-full gap-8">
-              <SignedOut>
-                <div className="flex flex-col items-center gap-6">
-                  <Link href="/sign-in" passHref>
-                    <Button
-                      variant="outline"
-                      className="w-48 py-6 text-lg border-neutral-700"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      Log In
-                    </Button>
+                {navItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "text-2xl transition-colors hover:text-white",
+                       pathname === item.href ? "text-white font-semibold" : "text-neutral-400"
+                    )}
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    {item.label}
                   </Link>
-                  <Link href="/sign-up" passHref>
-                    <Button
-                      className="w-48 py-6 text-lg bg-blue-500 hover:bg-blue-600 text-white"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      Sign Up
-                    </Button>
-                  </Link>
+                ))}
+                <div className="absolute bottom-24 flex flex-col items-center gap-6">
+                  <SignedOut>
+                    <Link href="/sign-in">
+                        <Button variant="ghost" className="w-48 py-6 text-xl text-neutral-400" onClick={() => setIsMenuOpen(false)}>
+                          Log In
+                        </Button>
+                    </Link>
+                    <Link href="/sign-up">
+                        <Button className="w-48 py-6 text-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold rounded-lg hover:opacity-90 transition-opacity" onClick={() => setIsMenuOpen(false)}>
+                          Sign Up
+                        </Button>
+                    </Link>
+                  </SignedOut>
+                  <SignedIn>
+                     <UserButton
+                        afterSignOutUrl="/"
+                        appearance={{
+                          elements: {
+                            avatarBox: "w-16 h-16",
+                          },
+                        }}
+                      />
+                  </SignedIn>
                 </div>
-              </SignedOut>
-              <SignedIn>
-                <UserButton
-                  afterSignOutUrl="/"
-                  appearance={{
-                    elements: {
-                      avatarBox: "w-16 h-16",
-                    },
-                  }}
-                />
-              </SignedIn>
             </div>
           </motion.div>
         )}
@@ -152,6 +168,5 @@ const Navbar = () => {
     </>
   );
 };
-
 export default Navbar;
 

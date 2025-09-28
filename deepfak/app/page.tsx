@@ -12,11 +12,12 @@ import {
   UploadCloud,
   Cpu,
   FileCheck,
-  ArrowRight,
+  Image,
+  Mic,
 } from "lucide-react";
 import { Vortex } from "@/components/ui/vortex";
 import { Button } from "@/components/ui/button";
-import Footer from "@/components/footer"; // Import the footer
+import Footer from "@/components/footer";
 
 export default function Home() {
   const features = [
@@ -30,7 +31,7 @@ export default function Home() {
     {
       title: "Rapid Analysis",
       description:
-        "Get results in seconds. Our optimized pipeline ensures swift processing of your images without compromising accuracy.",
+        "Get results in seconds. Our optimized pipeline ensures swift processing of your media without compromising accuracy.",
       icon: <Zap className="h-4 w-4 text-neutral-500" />,
       className: "md:col-span-1",
     },
@@ -49,18 +50,18 @@ export default function Home() {
       className: "md:col-span-1",
     },
     {
-      title: "Visual Anomaly Detection",
+      title: "Multi-Modal Support",
       description:
-        "Our algorithms are trained to spot subtle visual inconsistencies that are often invisible to the naked eye.",
+        "Our algorithms are trained to detect deepfakes in both images and audio files, spotting inconsistencies invisible to humans.",
       icon: <Eye className="h-4 w-4 text-neutral-500" />,
       className: "md:col-span-1",
-    },
+    }
   ];
 
   const steps = [
     {
-      title: "1. Upload Image",
-      description: "Securely upload the image or video you want to analyze.",
+      title: "1. Upload File",
+      description: "Securely upload the image or audio file you want to analyze.",
       icon: <UploadCloud size={40} />,
     },
     {
@@ -106,12 +107,15 @@ export default function Home() {
             </p>
             <div className="flex flex-col sm:flex-row items-center gap-6 mt-10">
               <Link href={"/detect"}>
-                <Button
-                  size="lg"
-                  className="px-8 py-7 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:opacity-90 transition-opacity duration-300 rounded-full group"
-                >
-                  Start Analyzing Now
-                  <ArrowRight className="ml-2 h-5 w-5 transition-transform duration-300 group-hover:translate-x-1" />
+                 <Button size="lg" className="px-8 py-6 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:opacity-90 group w-64">
+                  <Image className="mr-3 h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
+                  Analyze an Image
+                </Button>
+              </Link>
+              <Link href={"/audio"}>
+                 <Button size="lg" variant="outline" className="px-8 py-6 text-lg font-semibold w-64 group">
+                  <Mic className="mr-3 h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
+                  Analyze Audio
                 </Button>
               </Link>
             </div>
@@ -120,7 +124,7 @@ export default function Home() {
       </div>
 
       {/* How It Works Section */}
-      <div id="how-it-works" className="py-24 w-full bg-black relative z-10 px-4 scroll-mt-20">
+      <div id="how-it-works" className="py-24 w-full bg-black relative z-10 px-4">
         <div className="container mx-auto">
           <h2 className="text-4xl md:text-5xl font-bold text-center bg-clip-text text-transparent bg-gradient-to-b from-neutral-50 to-neutral-400 mb-16">
             Simple Steps to Certainty
@@ -146,7 +150,7 @@ export default function Home() {
       </div>
 
       {/* Features Section */}
-      <div id="features" className="py-24 w-full relative z-10 px-4 bg-black scroll-mt-20">
+      <div id="features" className="py-24 w-full relative z-10 px-4 bg-black">
         <div className="container mx-auto">
           <h2 className="text-4xl md:text-5xl font-bold text-center bg-clip-text text-transparent bg-gradient-to-b from-neutral-50 to-neutral-400 mb-16">
             A Powerful, Intuitive & Trustworthy Tool

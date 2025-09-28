@@ -34,7 +34,7 @@ const useImageAnalysis = () => {
 
     try {
       // Call Flask backend
-      const response = await axios.post("http://127.0.0.1:5000/predict", formData, {
+      const response = await axios.post(process.env.NEXT_PUBLIC_BACKEND_URL + "/predict", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
