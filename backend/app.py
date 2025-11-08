@@ -10,7 +10,7 @@ from models.BSFNet import BSFNet
 # -------------------------
 # Load Model
 # -------------------------
-model_path = "/Users/yogeshpoonia/Documents/100xdev/deepfake/backend/weights/bsfnet_deepfake.pth"
+model_path = "E:\DeepFake Demo Project - Capstone\Main App\deepfake\backend\weights\bsfnet_deepfake.pth"
 
 model = BSFNet(num_classes=1)
 state_dict = torch.load(model_path, map_location=torch.device("cpu"))
