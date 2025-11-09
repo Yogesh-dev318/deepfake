@@ -16,11 +16,17 @@ interface AnalysisResultType {
   timestamp: string;
 }
 
-// --- Custom Hook ---
+// --- Custom Hook (MODIFIED) ---
 const useImageAnalysis = () => {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResultType | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // --- NEW STATE for Grad-CAM Heatmap ---
+  const [isGeneratingHeatmap, setIsGeneratingHeatmap] = useState<boolean>(false);
+  const [heatmapImage, setHeatmapImage] = useState<string | null>(null);
+  const [heatmapError, setHeatmapError] = useState<string | null>(null);
+  // -----------------------------------------
 
   const analyzeImage = async (file: File | null) => {
     if (!file) return;
@@ -28,6 +34,8 @@ const useImageAnalysis = () => {
     setIsAnalyzing(true);
     setAnalysisResult(null);
     setApiError(null);
+    setHeatmapImage(null); // Clear previous heatmap
+    setHeatmapError(null); // Clear previous heatmap error
 
     const formData = new FormData();
     formData.append("file", file);
@@ -67,20 +75,99 @@ const useImageAnalysis = () => {
     }
   };
 
-  return { isAnalyzing, analysisResult, apiError, analyzeImage, setAnalysisResult, setApiError };
+  // --- NEW FUNCTION for Grad-CAM Heatmap ---
+  const generateHeatmap = async (file: File | null) => {
+    if (!file) return;
+
+    setIsGeneratingHeatmap(true);
+    setHeatmapImage(null);
+    setHeatmapError(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      // *** ASSUMPTION: New endpoint is named '/gradcam' ***
+      // This endpoint is expected to return a JSON with a base64 image string
+      // e.g., { "heatmap_image": "data:image/jpeg;base64,..." }
+      const response = await axios.post(process.env.NEXT_PUBLIC_BACKEND_URL + "/gradcam", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (response.data && response.data.heatmap_image) {
+        setHeatmapImage(response.data.heatmap_image);
+      } else {
+        throw new Error("Invalid response format from heatmap server.");
+      }
+
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        const serverError =
+          err.response?.data?.error ||
+          "Heatmap generation failed. Please try again.";
+        setHeatmapError(serverError);
+      } else if (err instanceof Error) {
+        setHeatmapError(err.message);
+      } else {
+        setHeatmapError("An unknown error occurred during heatmap generation.");
+      }
+      console.error(err);
+    } finally {
+      setIsGeneratingHeatmap(false);
+    }
+  };
+
+  // --- NEW FUNCTION to clear heatmap state ---
+  const clearHeatmap = () => {
+    setHeatmapImage(null);
+    setHeatmapError(null);
+  };
+  // -------------------------------------------
+
+  return {
+    isAnalyzing,
+    analysisResult,
+    apiError,
+    analyzeImage,
+    setAnalysisResult,
+    setApiError,
+    // --- NEW exports ---
+    isGeneratingHeatmap,
+    heatmapImage,
+    heatmapError,
+    generateHeatmap,
+    clearHeatmap,
+    // -------------------
+  };
 };
 
-// --- Main Page Component ---
+// --- Main Page Component (MODIFIED) ---
 export default function DetectPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { isAnalyzing, analysisResult, apiError, analyzeImage, setAnalysisResult, setApiError } = useImageAnalysis();
+
+  // --- MODIFIED: Destructure new items from hook ---
+  const {
+    isAnalyzing,
+    analysisResult,
+    apiError,
+    analyzeImage,
+    setAnalysisResult,
+    setApiError,
+    isGeneratingHeatmap,
+    heatmapImage,
+    heatmapError,
+    generateHeatmap,
+    clearHeatmap,
+  } = useImageAnalysis();
+  // --------------------------------------------------
 
   const handleFileSelect = (selectedFile: File) => {
     setAnalysisResult(null);
     setError(null);
     setApiError(null);
+    clearHeatmap(); // Clear heatmap on new file select
 
     const acceptedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
     if (!acceptedTypes.includes(selectedFile.type)) {
@@ -104,6 +191,7 @@ export default function DetectPage() {
     setError(null);
     setApiError(null);
     setAnalysisResult(null);
+    clearHeatmap(); // --- MODIFIED: Clear heatmap on reset ---
   }
 
   const displayedError = error || apiError;
@@ -131,7 +219,17 @@ export default function DetectPage() {
         <div className="w-full">
           <AnimatePresence mode="wait">
             {analysisResult ? (
-              <AnalysisResult result={analysisResult} onReset={handleReset} preview={preview} />
+              // --- MODIFIED: Pass new props to AnalysisResult ---
+              <AnalysisResult
+                result={analysisResult}
+                onReset={handleReset}
+                preview={preview}
+                onGenerateHeatmap={() => generateHeatmap(file)} // Pass the handler
+                isGeneratingHeatmap={isGeneratingHeatmap}
+                heatmapImage={heatmapImage}
+                heatmapError={heatmapError}
+              />
+              // ----------------------------------------------------
             ) : (
               <motion.div
                 key="upload"
@@ -184,14 +282,30 @@ export default function DetectPage() {
   );
 }
 
-// --- Sub-components for clarity ---
+// --- Sub-components (MODIFIED) ---
+
+// --- MODIFIED: Update props interface ---
 interface AnalysisResultProps {
   result: AnalysisResultType;
   onReset: () => void;
   preview: string | null;
+  onGenerateHeatmap: () => void;
+  isGeneratingHeatmap: boolean;
+  heatmapImage: string | null;
+  heatmapError: string | null;
 }
+// ------------------------------------
 
-const AnalysisResult: FC<AnalysisResultProps> = ({ result, onReset, preview }) => {
+// --- MODIFIED: Update component signature and add new UI elements ---
+const AnalysisResult: FC<AnalysisResultProps> = ({
+  result,
+  onReset,
+  preview,
+  onGenerateHeatmap,
+  isGeneratingHeatmap,
+  heatmapImage,
+  heatmapError
+}) => {
   const { isFake, confidence } = result;
   const resultColor = isFake ? "text-red-400" : "text-green-400";
   const resultBorder = isFake ? "border-red-500/30" : "border-green-500/30";
@@ -235,9 +349,60 @@ const AnalysisResult: FC<AnalysisResultProps> = ({ result, onReset, preview }) =
         Disclaimer: This analysis is based on our AI model and is not a definitive guarantee. Please use this information responsibly.
       </p>
 
-      <Button onClick={onReset} size="lg" variant="outline" className="mt-8 px-8 py-6 text-lg">
-        Analyze Another Image
-      </Button>
+      {/* --- NEW: Button Container --- */}
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
+        <Button onClick={onReset} size="lg" variant="outline" className="px-8 py-6 text-lg">
+          Analyze Another Image
+        </Button>
+        
+        {/* --- NEW: Heatmap Button --- */}
+        <Button
+          onClick={onGenerateHeatmap}
+          size="lg"
+          variant="default" // Or "secondary" if you prefer
+          className="px-8 py-6 text-lg bg-gradient-to-r from-teal-400 to-blue-500 hover:opacity-90 group"
+          disabled={isGeneratingHeatmap}
+        >
+          {isGeneratingHeatmap ? (
+            <>
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Generating...
+            </>
+          ) : (
+            <>
+              Show Heatmap
+              <Wand2 className="ml-2 h-5 w-5 transition-transform duration-300 group-hover:rotate-12" />
+            </>
+          )}
+        </Button>
+      </div>
+
+      {/* --- NEW: Heatmap Display Area --- */}
+      <AnimatePresence>
+        {heatmapImage && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, y: 20 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: 20 }}
+            transition={{ duration: 0.4, ease: "easeInOut" }}
+            className="w-full max-w-md mt-8"
+          >
+            <h3 className="text-xl font-semibold text-center mb-3">
+              Analysis Heatmap
+            </h3>
+            <p className="text-neutral-400 text-center text-sm mb-4">
+              This heatmap highlights the regions our model focused on.
+            </p>
+            <div className="w-full aspect-square rounded-lg overflow-hidden border border-neutral-700 bg-black flex items-center justify-center">
+              <img src={heatmapImage} alt="Analysis heatmap" className="max-w-full max-h-full object-contain" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* --- NEW: Heatmap Error Display --- */}
+      {heatmapError && <p className="text-red-500 text-center mt-4">{heatmapError}</p>}
+      
     </motion.div>
   );
 };

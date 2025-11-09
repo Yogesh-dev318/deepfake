@@ -17,12 +17,18 @@ interface AnalysisResultType {
   timestamp: string;
 }
 
-// --- Custom Hook for Audio Analysis ---
+// --- Custom Hook for Audio Analysis (MODIFIED) ---
 
 const useAudioAnalysis = () => {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResultType | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // --- NEW STATE for Spectrogram ---
+  const [isGeneratingSpectrogram, setIsGeneratingSpectrogram] = useState<boolean>(false);
+  const [spectrogramImage, setSpectrogramImage] = useState<string | null>(null);
+  const [spectrogramError, setSpectrogramError] = useState<string | null>(null);
+  // ---------------------------------
 
   const analyzeAudio = async (file: File | null) => {
     if (!file) return;
@@ -30,6 +36,8 @@ const useAudioAnalysis = () => {
     setIsAnalyzing(true);
     setAnalysisResult(null);
     setApiError(null);
+    setSpectrogramImage(null); // Clear previous spectrogram
+    setSpectrogramError(null); // Clear previous spectrogram error
 
     const formData = new FormData();
     formData.append("file", file);
@@ -62,21 +70,101 @@ const useAudioAnalysis = () => {
     }
   };
 
-  return { isAnalyzing, analysisResult, apiError, analyzeAudio, setAnalysisResult, setApiError };
+  // --- NEW FUNCTION for Spectrogram ---
+  const generateSpectrogram = async (file: File | null) => {
+    if (!file) return;
+
+    setIsGeneratingSpectrogram(true);
+    setSpectrogramImage(null);
+    setSpectrogramError(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      // *** ASSUMPTION: New endpoint is named '/spectrogram' ***
+      // This endpoint is expected to return a JSON with a base64 image string
+      // e.g., { "spectrogram_image": "data:image/jpeg;base64,..." }
+      const response = await axios.post(process.env.NEXT_PUBLIC_BACKEND_URL + "/spectrogram", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (response.data && response.data.spectrogram_image) {
+        setSpectrogramImage(response.data.spectrogram_image);
+      } else {
+        throw new Error("Invalid response format from spectrogram server.");
+      }
+
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        const serverError =
+          err.response?.data?.error ||
+          "Spectrogram generation failed. Please try again.";
+        setSpectrogramError(serverError);
+      } else if (err instanceof Error) {
+        setSpectrogramError(err.message);
+      } else {
+        setSpectrogramError("An unknown error occurred during spectrogram generation.");
+      }
+      console.error(err);
+    } finally {
+      setIsGeneratingSpectrogram(false);
+    }
+  };
+  
+  // --- NEW FUNCTION to clear spectrogram state ---
+  const clearSpectrogram = () => {
+    setSpectrogramImage(null);
+    setSpectrogramError(null);
+  };
+  // -------------------------------------------
+
+
+  return {
+    isAnalyzing,
+    analysisResult,
+    apiError,
+    analyzeAudio,
+    setAnalysisResult,
+    setApiError,
+    // --- NEW exports ---
+    isGeneratingSpectrogram,
+    spectrogramImage,
+    spectrogramError,
+    generateSpectrogram,
+    clearSpectrogram,
+    // -------------------
+  };
 };
 
 
-// --- Main Page Component ---
+// --- Main Page Component (MODIFIED) ---
 
 export default function AudioDetectPage() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { isAnalyzing, analysisResult, apiError, analyzeAudio, setAnalysisResult, setApiError } = useAudioAnalysis();
+
+  // --- MODIFIED: Destructure new items from hook ---
+  const {
+    isAnalyzing,
+    analysisResult,
+    apiError,
+    analyzeAudio,
+    setAnalysisResult,
+    setApiError,
+    isGeneratingSpectrogram,
+    spectrogramImage,
+    spectrogramError,
+    generateSpectrogram,
+    clearSpectrogram,
+  } = useAudioAnalysis();
+  // --------------------------------------------------
 
   const handleFileSelect = (selectedFile: File) => {
     setAnalysisResult(null);
     setError(null);
     setApiError(null);
+    clearSpectrogram(); // Clear spectrogram on new file select
 
     const acceptedTypes = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/flac'];
     if (!acceptedTypes.includes(selectedFile.type)) {
@@ -93,6 +181,7 @@ export default function AudioDetectPage() {
       setError(null);
       setApiError(null);
       setAnalysisResult(null);
+      clearSpectrogram(); // --- MODIFIED: Clear spectrogram on reset ---
   }
 
   const displayedError = error || apiError;
@@ -120,7 +209,17 @@ export default function AudioDetectPage() {
         <div className="w-full">
             <AnimatePresence mode="wait">
                 {analysisResult ? (
-                    <AnalysisResult result={analysisResult} onReset={handleReset} fileName={file?.name} />
+                    // --- MODIFIED: Pass new props to AnalysisResult ---
+                    <AnalysisResult
+                      result={analysisResult}
+                      onReset={handleReset}
+                      fileName={file?.name}
+                      onGenerateSpectrogram={() => generateSpectrogram(file)} // Pass the handler
+                      isGeneratingSpectrogram={isGeneratingSpectrogram}
+                      spectrogramImage={spectrogramImage}
+                      spectrogramError={spectrogramError}
+                    />
+                    // ----------------------------------------------------
                 ) : (
                   <motion.div
                     key="upload"
@@ -175,15 +274,30 @@ export default function AudioDetectPage() {
   );
 }
 
-// --- Sub-components for clarity ---
+// --- Sub-components (MODIFIED) ---
 
+// --- MODIFIED: Update props interface ---
 interface AnalysisResultProps {
     result: AnalysisResultType;
     onReset: () => void;
     fileName?: string;
+    onGenerateSpectrogram: () => void;
+    isGeneratingSpectrogram: boolean;
+    spectrogramImage: string | null;
+    spectrogramError: string | null;
 }
+// ------------------------------------
 
-const AnalysisResult: FC<AnalysisResultProps> = ({ result, onReset, fileName }) => {
+// --- MODIFIED: Update component signature and add new UI elements ---
+const AnalysisResult: FC<AnalysisResultProps> = ({
+  result,
+  onReset,
+  fileName,
+  onGenerateSpectrogram,
+  isGeneratingSpectrogram,
+  spectrogramImage,
+  spectrogramError
+}) => {
     const { isFake, confidence } = result;
     const resultColor = isFake ? "text-red-400" : "text-green-400";
     const resultBorder = isFake ? "border-red-500/30" : "border-green-500/30";
@@ -224,9 +338,60 @@ const AnalysisResult: FC<AnalysisResultProps> = ({ result, onReset, fileName }) 
                 Disclaimer: This analysis is based on our AI model and is not a definitive guarantee. Please use this information responsibly.
             </p>
 
-            <Button onClick={onReset} size="lg" variant="outline" className="mt-8 px-8 py-6 text-lg">
-                Analyze Another File
-            </Button>
+            {/* --- NEW: Button Container --- */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
+              <Button onClick={onReset} size="lg" variant="outline" className="px-8 py-6 text-lg">
+                  Analyze Another File
+              </Button>
+
+              {/* --- NEW: Spectrogram Button --- */}
+              <Button
+                onClick={onGenerateSpectrogram}
+                size="lg"
+                variant="default"
+                className="px-8 py-6 text-lg bg-gradient-to-r from-teal-400 to-blue-500 hover:opacity-90 group"
+                disabled={isGeneratingSpectrogram}
+              >
+                {isGeneratingSpectrogram ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    Show Spectrogram
+                    <Music className="ml-2 h-5 w-5 transition-transform duration-300 group-hover:rotate-12" />
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* --- NEW: Spectrogram Display Area --- */}
+            <AnimatePresence>
+              {spectrogramImage && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0, y: 20 }}
+                  animate={{ opacity: 1, height: 'auto', y: 0 }}
+                  exit={{ opacity: 0, height: 0, y: 20 }}
+                  transition={{ duration: 0.4, ease: "easeInOut" }}
+                  className="w-full max-w-lg mt-8" // Made this wider for spectrograms
+                >
+                  <h3 className="text-xl font-semibold text-center mb-3">
+                    Audio Spectrogram
+                  </h3>
+                  <p className="text-neutral-400 text-center text-sm mb-4">
+                    This spectrogram visualizes the frequency content of the audio file over time.
+                  </p>
+                  <div className="w-full rounded-lg overflow-hidden border border-neutral-700 bg-black flex items-center justify-center">
+                    <img src={spectrogramImage} alt="Audio spectrogram" className="w-full h-auto object-contain" />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            
+            {/* --- NEW: Spectrogram Error Display --- */}
+            {spectrogramError && <p className="text-red-500 text-center mt-4">{spectrogramError}</p>}
+            
         </motion.div>
     );
 };
