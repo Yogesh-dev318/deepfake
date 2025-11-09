@@ -5,12 +5,13 @@ from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS  # allow Next.js to call API
 
-from models.BSFNet import BSFNet
+from models.imageModel.BSFNet import BSFNet
 
 # -------------------------
 # Load Model
 # -------------------------
-model_path = "E:\DeepFake Demo Project - Capstone\Main App\deepfake\backend\weights\bsfnet_deepfake.pth"
+
+model_path = "E:\\DeepFake Demo Project - Capstone\\Main App\\deepfake\\backend\\weights\\image_weights\\bsfnet_deepfake.pth"
 
 model = BSFNet(num_classes=1)
 state_dict = torch.load(model_path, map_location=torch.device("cpu"))
