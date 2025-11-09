@@ -36,7 +36,7 @@ const useAudioAnalysis = () => {
 
     try {
       // Assuming a different endpoint for audio
-      const response = await axios.post("/api/predict_audio", formData); 
+      const response = await axios.post(process.env.NEXT_PUBLIC_BACKEND_URL + "/predict_audio", formData); 
       const data = response.data;
       const isFake = data.prediction === 'fake';
       const confidence = Math.round(data.confidence * 100);
