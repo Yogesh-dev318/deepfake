@@ -2,7 +2,10 @@
 
 import { useState, FC } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
+// Assuming these are local components, imports are fine.
+// Note: In a real single-file environment, these would be defined in this file.
+// For this example, we'll assume they exist as you've imported them.
+import { Button } from "@/components/ui/button"; 
 import { Loader2, CheckCircle, XCircle, Wand2 } from "lucide-react";
 import axios from 'axios';
 import { FileUpload } from "@/components/ui/file-upload";
@@ -14,19 +17,35 @@ interface AnalysisResultType {
   isFake: boolean;
   confidence: number;
   timestamp: string;
+  // --- NEW ---
+  // We add image_id here to potentially use the "preferred path"
+  // of the Grad-CAM endpoint, although the fallback is implemented below.
+  image_id: string | null; 
 }
 
-// --- Custom Hook (MODIFIED) ---
+// --- Custom Hook (MODIFIED for new /gradcam endpoint) ---
 const useImageAnalysis = () => {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResultType | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  // --- NEW STATE for Grad-CAM Heatmap ---
   const [isGeneratingHeatmap, setIsGeneratingHeatmap] = useState<boolean>(false);
+  // heatmapImage will now store a blob: URL
   const [heatmapImage, setHeatmapImage] = useState<string | null>(null);
   const [heatmapError, setHeatmapError] = useState<string | null>(null);
-  // -----------------------------------------
+
+  // --- NEW FUNCTION to clear heatmap state (MODIFIED) ---
+  const clearHeatmap = () => {
+    // Revoke the old blob URL to prevent memory leaks
+    setHeatmapImage(prevUrl => {
+      if (prevUrl && prevUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(prevUrl);
+      }
+      return null;
+    });
+    setHeatmapError(null);
+  };
+  // -------------------------------------------
 
   const analyzeImage = async (file: File | null) => {
     if (!file) return;
@@ -34,21 +53,18 @@ const useImageAnalysis = () => {
     setIsAnalyzing(true);
     setAnalysisResult(null);
     setApiError(null);
-    setHeatmapImage(null); // Clear previous heatmap
-    setHeatmapError(null); // Clear previous heatmap error
+    clearHeatmap(); // Clear previous heatmap
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      // Call Flask backend
       const response = await axios.post(process.env.NEXT_PUBLIC_BACKEND_URL + "/predict", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
       const data = response.data;
 
-      // Map Flask response to expected type
       const isFake = data.label === "Fake";
       const confidence = Math.round(data.probability * 100);
 
@@ -56,12 +72,13 @@ const useImageAnalysis = () => {
         isFake,
         confidence,
         timestamp: new Date().toLocaleString(),
+        image_id: data.image_id || null, // Store the image_id if provided
       });
 
     } catch (err) {
       if (axios.isAxiosError(err)) {
         const serverError =
-          err.response?.data?.error ||
+          err.response?.data?.error || err.response?.data?.message ||
           "Analysis failed due to a server error. Please try again.";
         setApiError(serverError);
       } else if (err instanceof Error) {
@@ -75,54 +92,62 @@ const useImageAnalysis = () => {
     }
   };
 
-  // --- NEW FUNCTION for Grad-CAM Heatmap ---
+  // --- MODIFIED FUNCTION for Grad-CAM Heatmap ---
   const generateHeatmap = async (file: File | null) => {
-    if (!file) return;
+    // We use the file as a fallback, matching the backend logic.
+    // If analysisResult.image_id exists, that would be the "preferred" path.
+    // For simplicity, we stick to the "fallback" file upload path which your
+    // backend supports and the frontend was already doing.
+    
+    if (!file) return; 
 
     setIsGeneratingHeatmap(true);
-    setHeatmapImage(null);
-    setHeatmapError(null);
+    // Clear previous heatmap *before* new request
+    clearHeatmap();
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      // *** ASSUMPTION: New endpoint is named '/gradcam' ***
-      // This endpoint is expected to return a JSON with a base64 image string
-      // e.g., { "heatmap_image": "data:image/jpeg;base64,..." }
+      // *** KEY CHANGE: ***
+      // We expect a 'blob' (raw image data), not JSON.
       const response = await axios.post(process.env.NEXT_PUBLIC_BACKEND_URL + "/gradcam", formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        responseType: 'blob', // <-- Tell axios to expect binary data
       });
 
-      if (response.data && response.data.heatmap_image) {
-        setHeatmapImage(response.data.heatmap_image);
-      } else {
-        throw new Error("Invalid response format from heatmap server.");
-      }
+      // *** KEY CHANGE: ***
+      // Create a temporary URL from the image blob
+      const blobUrl = URL.createObjectURL(response.data);
+      setHeatmapImage(blobUrl);
 
     } catch (err) {
+      let errorMessage = "Heatmap generation failed. Please try again.";
       if (axios.isAxiosError(err)) {
-        const serverError =
-          err.response?.data?.error ||
-          "Heatmap generation failed. Please try again.";
-        setHeatmapError(serverError);
+        // Error responses *are* JSON (as per your Flask code),
+        // but axios will read it as a blob. We must convert it back.
+        if (err.response && err.response.data && err.response.data.type === 'application/json') {
+          try {
+            // Read the error blob as text, then parse as JSON
+            const errorJsonText = await err.response.data.text();
+            const errorData = JSON.parse(errorJsonText);
+            errorMessage = errorData.message || errorMessage;
+          } catch (parseError) {
+            console.error("Failed to parse error blob:", parseError);
+          }
+        } else if (err.response?.data?.error) {
+           errorMessage = err.response.data.error;
+        }
       } else if (err instanceof Error) {
-        setHeatmapError(err.message);
-      } else {
-        setHeatmapError("An unknown error occurred during heatmap generation.");
+        errorMessage = err.message;
       }
+      
+      setHeatmapError(errorMessage);
       console.error(err);
     } finally {
       setIsGeneratingHeatmap(false);
     }
   };
-
-  // --- NEW FUNCTION to clear heatmap state ---
-  const clearHeatmap = () => {
-    setHeatmapImage(null);
-    setHeatmapError(null);
-  };
-  // -------------------------------------------
 
   return {
     isAnalyzing,
@@ -131,23 +156,20 @@ const useImageAnalysis = () => {
     analyzeImage,
     setAnalysisResult,
     setApiError,
-    // --- NEW exports ---
     isGeneratingHeatmap,
     heatmapImage,
     heatmapError,
     generateHeatmap,
     clearHeatmap,
-    // -------------------
   };
 };
 
-// --- Main Page Component (MODIFIED) ---
+// --- Main Page Component (No changes needed) ---
 export default function DetectPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // --- MODIFIED: Destructure new items from hook ---
   const {
     isAnalyzing,
     analysisResult,
@@ -161,7 +183,6 @@ export default function DetectPage() {
     generateHeatmap,
     clearHeatmap,
   } = useImageAnalysis();
-  // --------------------------------------------------
 
   const handleFileSelect = (selectedFile: File) => {
     setAnalysisResult(null);
@@ -178,6 +199,11 @@ export default function DetectPage() {
     }
 
     setFile(selectedFile);
+    
+    // Revoke old preview URL if it exists
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
     const previewUrl = URL.createObjectURL(selectedFile);
     setPreview(previewUrl);
   };
@@ -191,7 +217,7 @@ export default function DetectPage() {
     setError(null);
     setApiError(null);
     setAnalysisResult(null);
-    clearHeatmap(); // --- MODIFIED: Clear heatmap on reset ---
+    clearHeatmap(); // Clear heatmap on reset
   }
 
   const displayedError = error || apiError;
@@ -219,17 +245,15 @@ export default function DetectPage() {
         <div className="w-full">
           <AnimatePresence mode="wait">
             {analysisResult ? (
-              // --- MODIFIED: Pass new props to AnalysisResult ---
               <AnalysisResult
                 result={analysisResult}
                 onReset={handleReset}
                 preview={preview}
                 onGenerateHeatmap={() => generateHeatmap(file)} // Pass the handler
                 isGeneratingHeatmap={isGeneratingHeatmap}
-                heatmapImage={heatmapImage}
+                heatmapImage={heatmapImage} // This is now a blob: URL
                 heatmapError={heatmapError}
               />
-              // ----------------------------------------------------
             ) : (
               <motion.div
                 key="upload"
@@ -282,9 +306,8 @@ export default function DetectPage() {
   );
 }
 
-// --- Sub-components (MODIFIED) ---
+// --- Sub-components (No changes needed) ---
 
-// --- MODIFIED: Update props interface ---
 interface AnalysisResultProps {
   result: AnalysisResultType;
   onReset: () => void;
@@ -294,9 +317,7 @@ interface AnalysisResultProps {
   heatmapImage: string | null;
   heatmapError: string | null;
 }
-// ------------------------------------
 
-// --- MODIFIED: Update component signature and add new UI elements ---
 const AnalysisResult: FC<AnalysisResultProps> = ({
   result,
   onReset,
@@ -349,17 +370,15 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
         Disclaimer: This analysis is based on our AI model and is not a definitive guarantee. Please use this information responsibly.
       </p>
 
-      {/* --- NEW: Button Container --- */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
         <Button onClick={onReset} size="lg" variant="outline" className="px-8 py-6 text-lg">
           Analyze Another Image
         </Button>
         
-        {/* --- NEW: Heatmap Button --- */}
         <Button
           onClick={onGenerateHeatmap}
           size="lg"
-          variant="default" // Or "secondary" if you prefer
+          variant="default"
           className="px-8 py-6 text-lg bg-gradient-to-r from-teal-400 to-blue-500 hover:opacity-90 group"
           disabled={isGeneratingHeatmap}
         >
@@ -377,7 +396,6 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
         </Button>
       </div>
 
-      {/* --- NEW: Heatmap Display Area --- */}
       <AnimatePresence>
         {heatmapImage && (
           <motion.div
@@ -394,13 +412,13 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
               This heatmap highlights the regions our model focused on.
             </p>
             <div className="w-full aspect-square rounded-lg overflow-hidden border border-neutral-700 bg-black flex items-center justify-center">
+              {/* This img tag now correctly displays the blob: URL */}
               <img src={heatmapImage} alt="Analysis heatmap" className="max-w-full max-h-full object-contain" />
             </div>
           </motion.div>
         )}
       </AnimatePresence>
       
-      {/* --- NEW: Heatmap Error Display --- */}
       {heatmapError && <p className="text-red-500 text-center mt-4">{heatmapError}</p>}
       
     </motion.div>
