@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, FC } from "react";
+import { useState, FC, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle, XCircle, Wand2, FileAudio, Music } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Wand2, FileAudio, Music, Download, FilePlus } from "lucide-react";
 import axios from "axios";
 import { FileUpload } from "@/components/ui/file-upload";
 import { ShootingStars } from "@/components/ui/shooting-stars";
@@ -28,7 +28,7 @@ const useAudioAnalysis = () => {
   const [apiError, setApiError] = useState<string | null>(null);
 
   const [isGeneratingSpectrogram, setIsGeneratingSpectrogram] = useState<boolean>(false);
-  const [spectrogramImage, setSpectrogramImage] = useState<string | null>(null);
+  const [spectrogramImage, setSpectrogramImage] = useState<string | null>(null); // data URL
   const [spectrogramError, setSpectrogramError] = useState<string | null>(null);
 
   // Helper to convert ArrayBuffer (PNG bytes) to data URL
@@ -172,6 +172,7 @@ const useAudioAnalysis = () => {
 export default function AudioDetectPage() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   const {
     isAnalyzing,
@@ -187,15 +188,92 @@ export default function AudioDetectPage() {
     clearSpectrogram,
   } = useAudioAnalysis();
 
+  useEffect(() => {
+    // cleanup not strictly necessary since spectrogramImage is a data URL,
+    // but keep hook available for future blob URL usage.
+    return () => {};
+  }, []);
+
+  // Convert a blob: URL (or any URL) to a Data URL (base64). If already data URL, return as-is.
+  const urlToDataURL = async (url: string | null) => {
+    if (!url) return null;
+    if (url.startsWith("data:")) return url;
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      return await new Promise<string | null>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string | null);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.error("Failed converting url to dataURL", e);
+      return null;
+    }
+  };
+
+  // Generate report by calling server-side Next.js route which uses Gemini + pdf-lib
+  const generateReportSecure = async () => {
+    if (!analysisResult) return;
+    setIsGeneratingReport(true);
+    try {
+      // For audio, we send preview: null, heatmap: spectrogramImage (data URL)
+      const spectrogramDataUrl = await urlToDataURL(spectrogramImage);
+
+      const payload = {
+        result: {
+          // Keep only fields server expects for "result" (server ignores confidence in PDF)
+          isFake: analysisResult.isFake,
+          timestamp: analysisResult.timestamp,
+          image_id: analysisResult.audio_id || null, // map audio_id to image_id field so server can include it
+        },
+        preview: null,
+        heatmap: spectrogramDataUrl,
+      };
+
+      const res = await fetch("/api/generate-report/audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Report generation failed: ${res.status} ${txt}`);
+      }
+
+      const pdfBlob = await res.blob();
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audio-report-${Date.now()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error("generateReportSecure error", err);
+      setApiError(err?.message || "Failed to generate report.");
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
   const handleFileSelect = (selectedFile: File) => {
     setAnalysisResult(null);
     setError(null);
     setApiError(null);
     clearSpectrogram();
 
-    const acceptedTypes = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/flac'];
+    const acceptedTypes = ["audio/mpeg", "audio/wav", "audio/ogg", "audio/flac"];
     if (!acceptedTypes.includes(selectedFile.type)) {
       setError("Please upload a valid audio file (mp3, wav, ogg, flac).");
+      setFile(null);
+      return;
+    }
+
+    const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15 MB for audio
+    if (selectedFile.size > MAX_FILE_BYTES) {
+      setError("File is too large. Please upload an audio file under 15 MB.");
       setFile(null);
       return;
     }
@@ -209,6 +287,14 @@ export default function AudioDetectPage() {
     setApiError(null);
     setAnalysisResult(null);
     clearSpectrogram();
+  };
+
+  const downloadSpectrogram = () => {
+    if (!spectrogramImage) return;
+    const a = document.createElement("a");
+    a.href = spectrogramImage;
+    a.download = `spectrogram-${Date.now()}.png`;
+    a.click();
   };
 
   const displayedError = error || apiError;
@@ -243,6 +329,9 @@ export default function AudioDetectPage() {
                 isGeneratingSpectrogram={isGeneratingSpectrogram}
                 spectrogramImage={spectrogramImage}
                 spectrogramError={spectrogramError}
+                onGenerateReportSecure={generateReportSecure}
+                isGeneratingReport={isGeneratingReport}
+                onDownloadSpectrogram={downloadSpectrogram}
               />
             ) : (
               <motion.div
@@ -312,6 +401,9 @@ interface AnalysisResultProps {
   isGeneratingSpectrogram: boolean;
   spectrogramImage: string | null;
   spectrogramError: string | null;
+  onGenerateReportSecure: () => Promise<void>;
+  isGeneratingReport: boolean;
+  onDownloadSpectrogram: () => void;
 }
 
 const AnalysisResult: FC<AnalysisResultProps> = ({
@@ -321,7 +413,10 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
   onGenerateSpectrogram,
   isGeneratingSpectrogram,
   spectrogramImage,
-  spectrogramError
+  spectrogramError,
+  onGenerateReportSecure,
+  isGeneratingReport,
+  onDownloadSpectrogram,
 }) => {
   const { isFake, confidence } = result;
   const resultColor = isFake ? "text-red-400" : "text-green-400";
@@ -387,6 +482,26 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
             </>
           )}
         </Button>
+
+        <Button
+          onClick={onGenerateReportSecure}
+          size="lg"
+          variant="default"
+          className="px-8 py-6 text-lg bg-gradient-to-r from-indigo-500 to-violet-600 hover:opacity-90 group"
+          disabled={isGeneratingReport || !spectrogramImage}
+        >
+          {isGeneratingReport ? (
+            <>
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Generating Report...
+            </>
+          ) : (
+            <>
+              Generate Report
+              <FilePlus className="ml-2 h-5 w-5" />
+            </>
+          )}
+        </Button>
       </div>
 
       <AnimatePresence>
@@ -406,6 +521,12 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
             </p>
             <div className="w-full rounded-lg overflow-hidden border border-neutral-700 bg-black flex items-center justify-center">
               <img src={spectrogramImage} alt="Audio spectrogram" className="w-full h-auto object-contain" />
+            </div>
+
+            <div className="flex items-center justify-center gap-3 mt-4">
+              <Button onClick={onDownloadSpectrogram} size="sm" variant="outline" className="px-4 py-2">
+                <Download className="mr-2 h-4 w-4" /> Download Spectrogram
+              </Button>
             </div>
           </motion.div>
         )}
