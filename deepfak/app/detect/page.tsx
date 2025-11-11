@@ -1,81 +1,67 @@
 "use client";
 
-import { useState, FC } from "react";
+import { useState, FC, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-// Assuming these are local components, imports are fine.
-// Note: In a real single-file environment, these would be defined in this file.
-// For this example, we'll assume they exist as you've imported them.
-import { Button } from "@/components/ui/button"; 
-import { Loader2, CheckCircle, XCircle, Wand2 } from "lucide-react";
-import axios from 'axios';
+import { Button } from "@/components/ui/button";
+import { Loader2, CheckCircle, XCircle, Wand2, FilePlus, Download } from "lucide-react";
+import axios from "axios";
 import { FileUpload } from "@/components/ui/file-upload";
 import { ShootingStars } from "@/components/ui/shooting-stars";
 import { StarsBackground } from "@/components/ui/stars-background";
 
-// --- Type Definitions ---
+// --- Types ---
 interface AnalysisResultType {
   isFake: boolean;
   confidence: number;
   timestamp: string;
-  // --- NEW ---
-  // We add image_id here to potentially use the "preferred path"
-  // of the Grad-CAM endpoint, although the fallback is implemented below.
-  image_id: string | null; 
+  image_id: string | null;
 }
 
-// --- Custom Hook (MODIFIED for new /gradcam endpoint) ---
+// ------------------ useImageAnalysis (same as your hook, lightly adapted) ------------------
 const useImageAnalysis = () => {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResultType | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
   const [isGeneratingHeatmap, setIsGeneratingHeatmap] = useState<boolean>(false);
-  // heatmapImage will now store a blob: URL
-  const [heatmapImage, setHeatmapImage] = useState<string | null>(null);
+  const [heatmapImage, setHeatmapImage] = useState<string | null>(null); // blob: URL or null
   const [heatmapError, setHeatmapError] = useState<string | null>(null);
 
-  // --- NEW FUNCTION to clear heatmap state (MODIFIED) ---
-  const clearHeatmap = () => {
-    // Revoke the old blob URL to prevent memory leaks
+  const clearHeatmap = useCallback(() => {
     setHeatmapImage(prevUrl => {
-      if (prevUrl && prevUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(prevUrl);
+      if (prevUrl && prevUrl.startsWith("blob:")) {
+        try { URL.revokeObjectURL(prevUrl); } catch {}
       }
       return null;
     });
     setHeatmapError(null);
-  };
-  // -------------------------------------------
+  }, []);
 
   const analyzeImage = async (file: File | null) => {
     if (!file) return;
-
     setIsAnalyzing(true);
     setAnalysisResult(null);
     setApiError(null);
-    clearHeatmap(); // Clear previous heatmap
+    clearHeatmap();
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      const response = await axios.post(process.env.NEXT_PUBLIC_BACKEND_URL + "/predict", formData, {
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/predict`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
       const data = response.data;
-
       const isFake = data.label === "Fake";
       const confidence = Math.round(data.probability * 100);
-
       setAnalysisResult({
         isFake,
         confidence,
         timestamp: new Date().toLocaleString(),
-        image_id: data.image_id || null, // Store the image_id if provided
+        image_id: data.image_id || null,
       });
-
-    } catch (err) {
+    } catch (err: any) {
       if (axios.isAxiosError(err)) {
         const serverError =
           err.response?.data?.error || err.response?.data?.message ||
@@ -92,56 +78,44 @@ const useImageAnalysis = () => {
     }
   };
 
-  // --- MODIFIED FUNCTION for Grad-CAM Heatmap ---
   const generateHeatmap = async (file: File | null) => {
-    // We use the file as a fallback, matching the backend logic.
-    // If analysisResult.image_id exists, that would be the "preferred" path.
-    // For simplicity, we stick to the "fallback" file upload path which your
-    // backend supports and the frontend was already doing.
-    
-    if (!file) return; 
-
+    if (!file) return;
     setIsGeneratingHeatmap(true);
-    // Clear previous heatmap *before* new request
     clearHeatmap();
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      // *** KEY CHANGE: ***
-      // We expect a 'blob' (raw image data), not JSON.
-      const response = await axios.post(process.env.NEXT_PUBLIC_BACKEND_URL + "/gradcam", formData, {
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/gradcam`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
-        responseType: 'blob', // <-- Tell axios to expect binary data
+        responseType: "blob",
       });
 
-      // *** KEY CHANGE: ***
-      // Create a temporary URL from the image blob
       const blobUrl = URL.createObjectURL(response.data);
       setHeatmapImage(blobUrl);
-
-    } catch (err) {
+    } catch (err: any) {
       let errorMessage = "Heatmap generation failed. Please try again.";
       if (axios.isAxiosError(err)) {
-        // Error responses *are* JSON (as per your Flask code),
-        // but axios will read it as a blob. We must convert it back.
-        if (err.response && err.response.data && err.response.data.type === 'application/json') {
-          try {
-            // Read the error blob as text, then parse as JSON
-            const errorJsonText = await err.response.data.text();
-            const errorData = JSON.parse(errorJsonText);
-            errorMessage = errorData.message || errorMessage;
-          } catch (parseError) {
-            console.error("Failed to parse error blob:", parseError);
+        const res = err.response;
+        // If server returned JSON error as blob, try to parse it
+        if (res && res.data instanceof Blob) {
+          const contentType = res.headers?.["content-type"] || res.headers?.["Content-Type"];
+          if (contentType && contentType.includes("application/json")) {
+            try {
+              const text = await res.data.text();
+              const json = JSON.parse(text);
+              errorMessage = json.message || json.error || errorMessage;
+            } catch (parseError) {
+              console.error("Failed to parse error blob:", parseError);
+            }
           }
-        } else if (err.response?.data?.error) {
-           errorMessage = err.response.data.error;
+        } else if (res?.data && typeof res.data === "object") {
+          errorMessage = res.data.error || res.data.message || errorMessage;
         }
       } else if (err instanceof Error) {
         errorMessage = err.message;
       }
-      
       setHeatmapError(errorMessage);
       console.error(err);
     } finally {
@@ -164,10 +138,10 @@ const useImageAnalysis = () => {
   };
 };
 
-// --- Main Page Component (No changes needed) ---
+// ------------------ Main Page Component ------------------
 export default function DetectPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null); // blob: URL
   const [error, setError] = useState<string | null>(null);
 
   const {
@@ -184,13 +158,89 @@ export default function DetectPage() {
     clearHeatmap,
   } = useImageAnalysis();
 
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+
+  // Clean up blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      if (preview && preview.startsWith("blob:")) {
+        try { URL.revokeObjectURL(preview); } catch {}
+      }
+      if (heatmapImage && heatmapImage.startsWith("blob:")) {
+        try { URL.revokeObjectURL(heatmapImage); } catch {}
+      }
+    };
+    // We intentionally omit heatmapImage from deps to avoid re-running; cleanup on unmount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Convert a blob: URL (or any URL) to a Data URL (base64)
+  const urlToDataURL = async (url: string | null) => {
+    if (!url) return null;
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      return await new Promise<string | null>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string | null);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.error("Failed converting url to dataURL", e);
+      return null;
+    }
+  };
+
+  // Generate report by calling server-side Next.js route which uses Gemini + pdfkit
+  const generateReportSecure = async () => {
+    if (!analysisResult) return;
+    setIsGeneratingReport(true);
+    try {
+      const previewDataUrl = await urlToDataURL(preview);
+      const heatmapDataUrl = await urlToDataURL(heatmapImage);
+
+      // Minimal payload; server can reject if too large. Consider multipart if images are huge.
+      const payload = {
+        result: analysisResult,
+        preview: previewDataUrl,
+        heatmap: heatmapDataUrl,
+      };
+
+      const res = await fetch("/api/generate-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Report generation failed: ${res.status} ${txt}`);
+      }
+
+      const pdfBlob = await res.blob();
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `image-report-${Date.now()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error("generateReportSecure error", err);
+      setApiError(err?.message || "Failed to generate report.");
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
   const handleFileSelect = (selectedFile: File) => {
+    // Reset prior state
     setAnalysisResult(null);
     setError(null);
     setApiError(null);
-    clearHeatmap(); // Clear heatmap on new file select
+    clearHeatmap();
 
-    const acceptedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const acceptedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
     if (!acceptedTypes.includes(selectedFile.type)) {
       setError("Please upload a valid image file (png, jpg, webp).");
       setFile(null);
@@ -198,11 +248,19 @@ export default function DetectPage() {
       return;
     }
 
+    const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+    if (selectedFile.size > MAX_FILE_BYTES) {
+      setError("File is too large. Please upload an image under 10 MB.");
+      setFile(null);
+      setPreview(null);
+      return;
+    }
+
     setFile(selectedFile);
-    
+
     // Revoke old preview URL if it exists
     if (preview) {
-      URL.revokeObjectURL(preview);
+      try { URL.revokeObjectURL(preview); } catch {}
     }
     const previewUrl = URL.createObjectURL(selectedFile);
     setPreview(previewUrl);
@@ -211,23 +269,31 @@ export default function DetectPage() {
   const handleReset = () => {
     setFile(null);
     if (preview) {
-      URL.revokeObjectURL(preview);
+      try { URL.revokeObjectURL(preview); } catch {}
     }
     setPreview(null);
     setError(null);
     setApiError(null);
     setAnalysisResult(null);
-    clearHeatmap(); // Clear heatmap on reset
-  }
+    clearHeatmap();
+  };
 
   const displayedError = error || apiError;
+
+  // Download heatmap action
+  const downloadHeatmap = () => {
+    if (!heatmapImage) return;
+    const a = document.createElement("a");
+    a.href = heatmapImage;
+    a.download = `heatmap-${Date.now()}.png`;
+    a.click();
+  };
 
   return (
     <div className="relative w-full min-h-screen bg-black text-white py-24 px-4 sm:px-6 lg:px-8">
       <ShootingStars />
       <StarsBackground />
       <div className="relative z-10 container mx-auto max-w-3xl flex flex-col items-center">
-        
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -249,10 +315,13 @@ export default function DetectPage() {
                 result={analysisResult}
                 onReset={handleReset}
                 preview={preview}
-                onGenerateHeatmap={() => generateHeatmap(file)} // Pass the handler
+                onGenerateHeatmap={() => generateHeatmap(file)}
                 isGeneratingHeatmap={isGeneratingHeatmap}
-                heatmapImage={heatmapImage} // This is now a blob: URL
+                heatmapImage={heatmapImage}
                 heatmapError={heatmapError}
+                onGenerateReportSecure={generateReportSecure}
+                isGeneratingReport={isGeneratingReport}
+                onDownloadHeatmap={downloadHeatmap}
               />
             ) : (
               <motion.div
@@ -279,7 +348,12 @@ export default function DetectPage() {
                       <Button onClick={handleReset} variant="outline" className="px-6 py-3">
                         Change Image
                       </Button>
-                      <Button onClick={() => analyzeImage(file)} size="lg" className="px-8 py-6 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:opacity-90 group" disabled={isAnalyzing}>
+                      <Button
+                        onClick={() => analyzeImage(file)}
+                        size="lg"
+                        className="px-8 py-6 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:opacity-90 group"
+                        disabled={isAnalyzing}
+                      >
                         {isAnalyzing ? (
                           <>
                             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -306,8 +380,7 @@ export default function DetectPage() {
   );
 }
 
-// --- Sub-components (No changes needed) ---
-
+// ------------------ AnalysisResult component (updated with report button) ------------------
 interface AnalysisResultProps {
   result: AnalysisResultType;
   onReset: () => void;
@@ -316,6 +389,9 @@ interface AnalysisResultProps {
   isGeneratingHeatmap: boolean;
   heatmapImage: string | null;
   heatmapError: string | null;
+  onGenerateReportSecure: () => Promise<void>;
+  isGeneratingReport: boolean;
+  onDownloadHeatmap: () => void;
 }
 
 const AnalysisResult: FC<AnalysisResultProps> = ({
@@ -325,7 +401,10 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
   onGenerateHeatmap,
   isGeneratingHeatmap,
   heatmapImage,
-  heatmapError
+  heatmapError,
+  onGenerateReportSecure,
+  isGeneratingReport,
+  onDownloadHeatmap,
 }) => {
   const { isFake, confidence } = result;
   const resultColor = isFake ? "text-red-400" : "text-green-400";
@@ -394,6 +473,26 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
             </>
           )}
         </Button>
+
+        <Button
+          onClick={onGenerateReportSecure}
+          size="lg"
+          variant="default"
+          className="px-8 py-6 text-lg bg-gradient-to-r from-indigo-500 to-violet-600 hover:opacity-90 group"
+          disabled={isGeneratingReport || !heatmapImage}
+        >
+          {isGeneratingReport ? (
+            <>
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Generating Report...
+            </>
+          ) : (
+            <>
+              Generate Report
+              <FilePlus className="ml-2 h-5 w-5" />
+            </>
+          )}
+        </Button>
       </div>
 
       <AnimatePresence>
@@ -412,8 +511,13 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
               This heatmap highlights the regions our model focused on.
             </p>
             <div className="w-full aspect-square rounded-lg overflow-hidden border border-neutral-700 bg-black flex items-center justify-center">
-              {/* This img tag now correctly displays the blob: URL */}
               <img src={heatmapImage} alt="Analysis heatmap" className="max-w-full max-h-full object-contain" />
+            </div>
+
+            <div className="flex items-center justify-center gap-3 mt-4">
+              <Button onClick={onDownloadHeatmap} size="sm" variant="outline" className="px-4 py-2">
+                <Download className="mr-2 h-4 w-4" /> Download Heatmap
+              </Button>
             </div>
           </motion.div>
         )}
