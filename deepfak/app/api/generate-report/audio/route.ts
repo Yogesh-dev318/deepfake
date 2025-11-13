@@ -17,6 +17,8 @@ function dataUrlMime(dataUrl?: string | null) {
   return m ? m[1] : null;
 }
 
+
+
 function buildAudioPrompt(result: { isFake: boolean; timestamp?: string; image_id?: string | null }) {
   const verdict = result.isFake ? "Likely AI-Generated" : "Appears Authentic";
   return `You are an expert audio forensic analyst.
