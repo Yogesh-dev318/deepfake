@@ -37,7 +37,7 @@ export default function Page() {
 
       {/* Centered Sign-In Component */}
       <div className="flex justify-center items-center w-full h-full">
-        <SignIn appearance={Theme} />
+        <SignIn  />
       </div>
     </div>
     

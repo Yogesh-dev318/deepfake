@@ -207,7 +207,7 @@ export default function DetectPage() {
         heatmap: heatmapDataUrl,
       };
 
-      const res = await fetch("/api/generate-report", {
+      const res = await fetch("/api/generate-report/image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
