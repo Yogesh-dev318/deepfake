@@ -102,6 +102,9 @@ except Exception as e:
 app = Flask(__name__)
 CORS(app)
 
+@app.route("/")
+def home():
+    return jsonify({"message": "Hello from Flask API!"})
 
 # @app.route("/predict", methods=["POST"])
 # def predict():
