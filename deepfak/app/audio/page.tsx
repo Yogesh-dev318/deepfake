@@ -441,7 +441,7 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
         {isFake ? "Likely AI-Generated" : "Appears Authentic"}
       </h2>
 
-      <p className="text-neutral-300 text-lg mt-2">
+      {/* <p className="text-neutral-300 text-lg mt-2">
         Our model is <span className="font-bold text-white">{confidence}%</span> confident in this result.
       </p>
 
@@ -452,7 +452,7 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
           animate={{ width: `${confidence}%` }}
           transition={{ duration: 0.8, ease: "easeOut" }}
         ></motion.div>
-      </div>
+      </div> */}
 
       <p className="text-neutral-500 text-sm max-w-md">
         Disclaimer: This analysis is based on our AI model and is not a definitive guarantee. Please use this information responsibly.

@@ -431,11 +431,11 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
       <h2 className={`text-3xl font-bold mt-4 ${resultColor}`}>
         {isFake ? "Likely AI-Generated" : "Appears Authentic"}
       </h2>
-      
+{/*       
       <p className="text-neutral-300 text-lg mt-2">
         Our model is <span className="font-bold text-white">{confidence}%</span> confident in this result.
-      </p>
-
+      </p> */}
+{/* 
       <div className="w-full bg-neutral-800 rounded-full h-2.5 my-6">
         <motion.div 
           className={`h-2.5 rounded-full ${isFake ? 'bg-red-500' : 'bg-green-500'}`} 
@@ -443,7 +443,7 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
           animate={{ width: `${confidence}%` }}
           transition={{ duration: 0.8, ease: "easeOut" }}
         ></motion.div>
-      </div>
+      </div> */}
 
       <p className="text-neutral-500 text-sm max-w-md">
         Disclaimer: This analysis is based on our AI model and is not a definitive guarantee. Please use this information responsibly.
