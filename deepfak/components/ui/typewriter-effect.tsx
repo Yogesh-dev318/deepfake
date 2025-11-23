@@ -26,8 +26,10 @@ export const TypewriterEffect = ({
 
   const [scope, animate] = useAnimate();
   const isInView = useInView(scope);
+
   useEffect(() => {
-    if (isInView) {
+    // include `animate` in deps and guard its usage
+    if (isInView && animate) {
       animate(
         "span",
         {
@@ -42,7 +44,7 @@ export const TypewriterEffect = ({
         }
       );
     }
-  }, [isInView]);
+  }, [isInView, animate]);
 
   const renderWords = () => {
     return (
@@ -55,7 +57,7 @@ export const TypewriterEffect = ({
                   initial={{}}
                   key={`char-${index}`}
                   className={cn(
-                    `dark:text-white text-black opacity-0 hidden`,
+                    `dark:text-white text-black opacity:0 hidden`,
                     word.className
                   )}
                 >

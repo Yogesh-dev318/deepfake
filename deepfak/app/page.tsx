@@ -8,11 +8,10 @@ import {
   TestTubeDiagonal,
   GraduationCap,
   Eye,
-  BadgeCheck,
   UploadCloud,
   Cpu,
   FileCheck,
-  Image,
+  Image as ImageIcon,
   Mic,
 } from "lucide-react";
 import { Vortex } from "@/components/ui/vortex";
@@ -102,13 +101,12 @@ export default function Home() {
             <p className="text-base md:text-xl text-neutral-300 max-w-3xl mx-auto mt-4">
               In an era of artificial reality, our platform provides the ground
               truth. Protect your integrity, verify authenticity, and build
-              trust with the world's most advanced deepfake detection
-              technology.
+              trust with industry-leading deepfake detection technology.
             </p>
             <div className="flex flex-col sm:flex-row items-center gap-6 mt-10">
               <Link href={"/detect"}>
                  <Button size="lg" className="px-8 py-6 text-lg font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:opacity-90 group w-64">
-                  <Image className="mr-3 h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
+                  <ImageIcon className="mr-3 h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
                   Analyze an Image
                 </Button>
               </Link>
@@ -172,4 +170,3 @@ export default function Home() {
     </main>
   );
 }
-

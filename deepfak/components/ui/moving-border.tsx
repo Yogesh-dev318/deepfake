@@ -1,5 +1,5 @@
 "use client";
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 interface MovingBorderProps {
@@ -9,8 +9,9 @@ interface MovingBorderProps {
   duration?: number;
   color?: string;
   className?: string;
-  as?: keyof JSX.IntrinsicElements;
-  [key: string]: any;
+  as?: React.ElementType;
+  // allow additional HTML attributes but keep them typed safely
+  [key: string]: unknown;
 }
 
 export const MovingBorder: React.FC<MovingBorderProps> = ({
@@ -20,44 +21,39 @@ export const MovingBorder: React.FC<MovingBorderProps> = ({
   duration = 2000,
   color = "rgb(59, 130, 246)",
   className,
-  as: Component = "div",
+  as: InnerTag = "div",
   ...props
 }) => {
-  const ref = useRef<HTMLElement>(null);
-  const [isHovered, setIsHovered] = useState(false);
+  // use a stable div ref to attach mouse listeners and style changes
+  const outerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!ref.current) return;
+    const element = outerRef.current;
+    if (!element) return;
 
-    const element = ref.current;
-    
-    const updateGradient = () => {
+    const updateGradient = (clientX?: number, clientY?: number) => {
       const rect = element.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      
+      const centerX = typeof clientX === "number" ? clientX : rect.width / 2;
+      const centerY = typeof clientY === "number" ? clientY : rect.height / 2;
+
+      // Use coordinates relative to the element for the gradient center
       const gradient = `conic-gradient(from 0deg at ${centerX}px ${centerY}px, ${color}, transparent, ${color})`;
       element.style.background = gradient;
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!ref.current) return;
-      
-      const rect = ref.current.getBoundingClientRect();
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      
-      const gradient = `conic-gradient(from 0deg at ${x}px ${y}px, ${color}, transparent, ${color})`;
-      ref.current.style.background = gradient;
+      updateGradient(x, y);
     };
 
     const handleMouseEnter = () => {
-      setIsHovered(true);
       updateGradient();
     };
 
     const handleMouseLeave = () => {
-      setIsHovered(false);
       updateGradient();
     };
 
@@ -75,9 +71,15 @@ export const MovingBorder: React.FC<MovingBorderProps> = ({
     };
   }, [color, duration]);
 
+  // We want to allow arbitrary HTML attributes to be passed in `props`,
+  // but when spreading onto the outer div we must satisfy JSX typing.
+  const safeProps = props as React.HTMLAttributes<HTMLDivElement>;
+
+  const Inner = InnerTag as React.ElementType;
+
   return (
-    <Component
-      ref={ref}
+    <div
+      ref={outerRef}
       className={cn(
         "relative overflow-hidden",
         "before:absolute before:inset-0 before:rounded-[inherit] before:p-[1px] before:bg-gradient-to-r before:from-transparent before:via-current before:to-transparent",
@@ -89,13 +91,11 @@ export const MovingBorder: React.FC<MovingBorderProps> = ({
         background: `conic-gradient(from 0deg, ${color}, transparent, ${color})`,
         padding: `${borderWidth}px`,
       }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      {...props}
+      {...safeProps}
     >
-      <div className="relative z-10 h-full w-full rounded-[inherit] bg-background">
+      <Inner className="relative z-10 h-full w-full rounded-[inherit] bg-background">
         {children}
-      </div>
-    </Component>
+      </Inner>
+    </div>
   );
 };

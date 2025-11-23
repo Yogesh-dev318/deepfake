@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FC, useEffect, useCallback } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle, XCircle, Wand2, FilePlus, Download } from "lucide-react";
@@ -54,25 +55,37 @@ const useImageAnalysis = () => {
 
       const data = response.data;
       const isFake = data.label === "Fake";
-      const confidence = Math.round(data.probability * 100);
+      const confidence = Math.round((typeof data.probability === "number" ? data.probability : 0) * 100);
       setAnalysisResult({
         isFake,
         confidence,
         timestamp: new Date().toLocaleString(),
         image_id: data.image_id || null,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      // handle axios errors and unknown shapes without using `any`
       if (axios.isAxiosError(err)) {
-        const serverError =
-          err.response?.data?.error || err.response?.data?.message ||
-          "Analysis failed due to a server error. Please try again.";
+        const axiosErr = err as { response?: { data?: unknown } };
+        const serverData = axiosErr.response?.data;
+        let serverError = "Analysis failed due to a server error. Please try again.";
+
+        if (serverData) {
+          if (typeof serverData === "string") {
+            serverError = serverData;
+          } else if (typeof serverData === "object" && serverData !== null) {
+            const sd = serverData as Record<string, unknown>;
+            if (typeof sd.error === "string") serverError = sd.error;
+            else if (typeof sd.message === "string") serverError = sd.message;
+          }
+        }
+
         setApiError(serverError);
       } else if (err instanceof Error) {
         setApiError(err.message);
       } else {
         setApiError("An unknown error occurred during analysis.");
       }
-      console.error(err);
+      console.error("analyzeImage error:", err);
     } finally {
       setIsAnalyzing(false);
     }
@@ -94,30 +107,38 @@ const useImageAnalysis = () => {
 
       const blobUrl = URL.createObjectURL(response.data);
       setHeatmapImage(blobUrl);
-    } catch (err: any) {
+    } catch (err: unknown) {
       let errorMessage = "Heatmap generation failed. Please try again.";
       if (axios.isAxiosError(err)) {
-        const res = err.response;
+        const res = (err as { response?: { data?: unknown; headers?: Record<string, string> } }).response;
         // If server returned JSON error as blob, try to parse it
         if (res && res.data instanceof Blob) {
-          const contentType = res.headers?.["content-type"] || res.headers?.["Content-Type"];
-          if (contentType && contentType.includes("application/json")) {
-            try {
-              const text = await res.data.text();
-              const json = JSON.parse(text);
-              errorMessage = json.message || json.error || errorMessage;
-            } catch (parseError) {
-              console.error("Failed to parse error blob:", parseError);
+          try {
+            const contentType = res.headers?.["content-type"] || res.headers?.["Content-Type"] || "";
+            if (contentType.includes("application/json")) {
+              const text = await (res.data as Blob).text();
+              try {
+                const json = JSON.parse(text);
+                errorMessage = json.message || json.error || errorMessage;
+              } catch {
+                // ignore parse
+              }
             }
+          } catch (parseError) {
+            console.error("Failed to parse error blob:", parseError);
           }
         } else if (res?.data && typeof res.data === "object") {
-          errorMessage = res.data.error || res.data.message || errorMessage;
+          const d = res.data as Record<string, unknown>;
+          if (typeof d.error === "string") errorMessage = d.error;
+          else if (typeof d.message === "string") errorMessage = d.message;
+        } else if (res?.data && typeof res.data === "string") {
+          errorMessage = res.data;
         }
       } else if (err instanceof Error) {
         errorMessage = err.message;
       }
       setHeatmapError(errorMessage);
-      console.error(err);
+      console.error("generateHeatmap error:", err);
     } finally {
       setIsGeneratingHeatmap(false);
     }
@@ -183,7 +204,7 @@ export default function DetectPage() {
       return await new Promise<string | null>((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string | null);
-        reader.onerror = reject;
+        reader.onerror = () => reject(new Error("Failed converting url to dataURL"));
         reader.readAsDataURL(blob);
       });
     } catch (e) {
@@ -225,9 +246,9 @@ export default function DetectPage() {
       a.download = `image-report-${Date.now()}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("generateReportSecure error", err);
-      setApiError(err?.message || "Failed to generate report.");
+      setApiError(err instanceof Error ? err.message : String(err ?? "Failed to generate report."));
     } finally {
       setIsGeneratingReport(false);
     }
@@ -342,7 +363,9 @@ export default function DetectPage() {
                 ) : (
                   <div className="w-full flex flex-col items-center gap-6">
                     <div className="w-full max-w-md aspect-square rounded-lg overflow-hidden border border-neutral-800 bg-black flex items-center justify-center">
-                      <img src={preview} alt="Image preview" className="max-w-full max-h-full object-contain" />
+                      <div className="relative w-full h-full">
+                        <Image src={preview} alt="Image preview" fill style={{ objectFit: "contain" }} unoptimized />
+                      </div>
                     </div>
                     <div className="flex items-center gap-4">
                       <Button onClick={handleReset} variant="outline" className="px-6 py-3">
@@ -406,7 +429,7 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
   isGeneratingReport,
   onDownloadHeatmap,
 }) => {
-  const { isFake, confidence } = result;
+  const { isFake } = result; // removed unused `confidence` destructure
   const resultColor = isFake ? "text-red-400" : "text-green-400";
   const resultBorder = isFake ? "border-red-500/30" : "border-green-500/30";
   const resultIcon = isFake ? <XCircle size={48} className={resultColor} /> : <CheckCircle size={48} className={resultColor} />;
@@ -421,29 +444,16 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
       className={`w-full p-8 border ${resultBorder} bg-neutral-900/50 rounded-lg flex flex-col items-center text-center`}
     >
       {preview && (
-        <div className="w-48 h-48 rounded-lg overflow-hidden border-2 border-neutral-700 mb-6">
-          <img src={preview} alt="Analyzed image" className="w-full h-full object-cover"/>
+        <div className="w-48 h-48 rounded-lg overflow-hidden border-2 border-neutral-700 mb-6 relative">
+          <Image src={preview} alt="Analyzed image" fill style={{ objectFit: "cover" }} unoptimized />
         </div>
       )}
-      
+
       {resultIcon}
-      
+
       <h2 className={`text-3xl font-bold mt-4 ${resultColor}`}>
         {isFake ? "Likely AI-Generated" : "Appears Authentic"}
       </h2>
-{/*       
-      <p className="text-neutral-300 text-lg mt-2">
-        Our model is <span className="font-bold text-white">{confidence}%</span> confident in this result.
-      </p> */}
-{/* 
-      <div className="w-full bg-neutral-800 rounded-full h-2.5 my-6">
-        <motion.div 
-          className={`h-2.5 rounded-full ${isFake ? 'bg-red-500' : 'bg-green-500'}`} 
-          initial={{ width: 0 }}
-          animate={{ width: `${confidence}%` }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
-        ></motion.div>
-      </div> */}
 
       <p className="text-neutral-500 text-sm max-w-md">
         Disclaimer: This analysis is based on our AI model and is not a definitive guarantee. Please use this information responsibly.
@@ -453,7 +463,7 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
         <Button onClick={onReset} size="lg" variant="outline" className="px-8 py-6 text-lg">
           Analyze Another Image
         </Button>
-        
+
         <Button
           onClick={onGenerateHeatmap}
           size="lg"
@@ -499,7 +509,7 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
         {heatmapImage && (
           <motion.div
             initial={{ opacity: 0, height: 0, y: 20 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            animate={{ opacity: 1, height: "auto", y: 0 }}
             exit={{ opacity: 0, height: 0, y: 20 }}
             transition={{ duration: 0.4, ease: "easeInOut" }}
             className="w-full max-w-md mt-8"
@@ -510,8 +520,8 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
             <p className="text-neutral-400 text-center text-sm mb-4">
               This heatmap highlights the regions our model focused on.
             </p>
-            <div className="w-full aspect-square rounded-lg overflow-hidden border border-neutral-700 bg-black flex items-center justify-center">
-              <img src={heatmapImage} alt="Analysis heatmap" className="max-w-full max-h-full object-contain" />
+            <div className="w-full aspect-square rounded-lg overflow-hidden border border-neutral-700 bg-black flex items-center justify-center relative">
+              <Image src={heatmapImage} alt="Analysis heatmap" fill style={{ objectFit: "contain" }} unoptimized />
             </div>
 
             <div className="flex items-center justify-center gap-3 mt-4">
@@ -522,9 +532,9 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
-      
+
       {heatmapError && <p className="text-red-500 text-center mt-4">{heatmapError}</p>}
-      
+
     </motion.div>
   );
 };

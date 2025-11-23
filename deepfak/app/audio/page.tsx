@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FC, useEffect } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle, XCircle, Wand2, FileAudio, Music, Download, FilePlus } from "lucide-react";
@@ -17,6 +18,23 @@ interface AnalysisResultType {
   confidence: number;
   timestamp: string;
   audio_id?: string; // uuid returned by /predict_audio
+}
+
+/* =========================
+   Helpers
+   ========================= */
+
+function getErrorMessage(err: unknown): string {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  try {
+    const maybe = err as { message?: unknown };
+    if (typeof maybe.message === "string") return maybe.message;
+  } catch {
+    // ignore
+  }
+  return "Unknown error";
 }
 
 /* =========================
@@ -37,7 +55,7 @@ const useAudioAnalysis = () => {
     return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (e) => reject(e);
+      reader.onerror = () => reject(new Error("Failed to read blob as data URL"));
       reader.readAsDataURL(blob);
     });
   };
@@ -74,16 +92,30 @@ const useAudioAnalysis = () => {
         timestamp: new Date().toLocaleString(),
         audio_id,
       });
-    } catch (err) {
+    } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
-        const serverError = err.response?.data?.message || "Analysis failed due to a server error. Please try again.";
+        // safely extract server message from possible shapes without using `any`
+        const axiosErr = err as { response?: { data?: unknown } };
+        const serverData = axiosErr.response?.data;
+        let serverError = "Analysis failed due to a server error. Please try again.";
+
+        if (serverData) {
+          if (typeof serverData === "string") {
+            serverError = serverData;
+          } else if (typeof serverData === "object" && serverData !== null) {
+            const sd = serverData as Record<string, unknown>;
+            if (typeof sd.message === "string") serverError = sd.message;
+            else if (typeof sd.error === "string") serverError = sd.error;
+          }
+        }
+
         setApiError(serverError);
       } else if (err instanceof Error) {
         setApiError(err.message);
       } else {
         setApiError("An unknown error occurred during analysis.");
       }
-      console.error(err);
+      console.error("analyzeAudio error:", getErrorMessage(err));
     } finally {
       setIsAnalyzing(false);
     }
@@ -119,19 +151,36 @@ const useAudioAnalysis = () => {
 
       const dataUrl = await arrayBufferToDataUrl(response.data);
       setSpectrogramImage(dataUrl);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
-        // Try to parse JSON error message if present
+        // Try to parse JSON error message if present, without using `any`
         let serverMsg = "Spectrogram generation failed. Please try again.";
         try {
-          const contentType = err.response?.headers?.["content-type"] || "";
-          if (err.response?.data && contentType.includes("application/json")) {
-            const parsed = typeof err.response.data === "string" ? JSON.parse(err.response.data) : err.response.data;
-            serverMsg = parsed?.message || parsed?.error || serverMsg;
-          } else if (err.response?.data && typeof err.response.data === "string") {
-            serverMsg = err.response.data;
+          const axiosErr = err as { response?: { headers?: Record<string, string>; data?: unknown } };
+          const contentType = axiosErr.response?.headers?.["content-type"] || "";
+          const respData = axiosErr.response?.data;
+
+          if (respData && typeof contentType === "string" && contentType.includes("application/json")) {
+            let parsed: unknown = undefined;
+            if (typeof respData === "string") {
+              try {
+                parsed = JSON.parse(respData);
+              } catch {
+                parsed = undefined;
+              }
+            } else {
+              parsed = respData;
+            }
+
+            if (parsed && typeof parsed === "object") {
+              const p = parsed as Record<string, unknown>;
+              if (typeof p.message === "string") serverMsg = p.message;
+              else if (typeof p.error === "string") serverMsg = p.error;
+            }
+          } else if (respData && typeof respData === "string") {
+            serverMsg = respData;
           }
-        } catch (e) {
+        } catch {
           // ignore parse errors
         }
         setSpectrogramError(serverMsg);
@@ -140,7 +189,7 @@ const useAudioAnalysis = () => {
       } else {
         setSpectrogramError("An unknown error occurred during spectrogram generation.");
       }
-      console.error(err);
+      console.error("generateSpectrogram error:", getErrorMessage(err));
     } finally {
       setIsGeneratingSpectrogram(false);
     }
@@ -204,7 +253,7 @@ export default function AudioDetectPage() {
       return await new Promise<string | null>((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string | null);
-        reader.onerror = reject;
+        reader.onerror = () => reject(new Error("Failed converting url to dataURL"));
         reader.readAsDataURL(blob);
       });
     } catch (e) {
@@ -250,9 +299,9 @@ export default function AudioDetectPage() {
       a.download = `audio-report-${Date.now()}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (err: any) {
-      console.error("generateReportSecure error", err);
-      setApiError(err?.message || "Failed to generate report.");
+    } catch (err: unknown) {
+      console.error("generateReportSecure error", getErrorMessage(err));
+      setApiError(getErrorMessage(err) || "Failed to generate report.");
     } finally {
       setIsGeneratingReport(false);
     }
@@ -418,7 +467,7 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
   isGeneratingReport,
   onDownloadSpectrogram,
 }) => {
-  const { isFake, confidence } = result;
+  const { isFake } = result;
   const resultColor = isFake ? "text-red-400" : "text-green-400";
   const resultBorder = isFake ? "border-red-500/30" : "border-green-500/30";
   const resultIcon = isFake ? <XCircle size={48} className={resultColor} /> : <CheckCircle size={48} className={resultColor} />;
@@ -440,19 +489,6 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
       <h2 className={`text-3xl font-bold mt-4 ${resultColor}`}>
         {isFake ? "Likely AI-Generated" : "Appears Authentic"}
       </h2>
-
-      {/* <p className="text-neutral-300 text-lg mt-2">
-        Our model is <span className="font-bold text-white">{confidence}%</span> confident in this result.
-      </p>
-
-      <div className="w-full bg-neutral-800 rounded-full h-2.5 my-6">
-        <motion.div
-          className={`h-2.5 rounded-full ${isFake ? 'bg-red-500' : 'bg-green-500'}`}
-          initial={{ width: 0 }}
-          animate={{ width: `${confidence}%` }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
-        ></motion.div>
-      </div> */}
 
       <p className="text-neutral-500 text-sm max-w-md">
         Disclaimer: This analysis is based on our AI model and is not a definitive guarantee. Please use this information responsibly.
@@ -508,7 +544,7 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
         {spectrogramImage && (
           <motion.div
             initial={{ opacity: 0, height: 0, y: 20 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            animate={{ opacity: 1, height: "auto", y: 0 }}
             exit={{ opacity: 0, height: 0, y: 20 }}
             transition={{ duration: 0.4, ease: "easeInOut" }}
             className="w-full max-w-lg mt-8"
@@ -520,7 +556,17 @@ const AnalysisResult: FC<AnalysisResultProps> = ({
               This spectrogram visualizes the frequency content of the audio file over time.
             </p>
             <div className="w-full rounded-lg overflow-hidden border border-neutral-700 bg-black flex items-center justify-center">
-              <img src={spectrogramImage} alt="Audio spectrogram" className="w-full h-auto object-contain" />
+              {/* Next.js Image requires width and height; using reasonable defaults for display */}
+              <div className="relative w-full" style={{ height: 400 }}>
+                <Image
+                  src={spectrogramImage}
+                  alt="Audio spectrogram"
+                  fill
+                  style={{ objectFit: "contain" }}
+                  sizes="(max-width: 1024px) 100vw, 1024px"
+                  priority={false}
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-center gap-3 mt-4">
